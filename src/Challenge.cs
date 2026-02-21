@@ -1,34 +1,29 @@
-// DESAFIO: Editor de Texto com Formatação de Caracteres
-// PROBLEMA: Um editor de texto precisa renderizar milhões de caracteres, cada um com
-// propriedades de formatação (fonte, tamanho, cor, estilo). Criar um objeto para cada
-// caractere consome memória excessiva e degrada performance
-
 using System;
 using System.Collections.Generic;
 
 namespace DesignPatternChallenge
 {
-    // Contexto: Editor que precisa representar documentos grandes com formatação rica
-    // Cada caractere tem estado intrínseco (compartilhável) e extrínseco (único)
-    
-    // Problema: Abordagem ingênua - um objeto completo para cada caractere
-    public class Character
+    // ============================
+    // 1) FLYWEIGHT (estado intrínseco)
+    // ============================
+    public class CharacterStyle
     {
-        // Estado intrínseco (compartilhável entre caracteres iguais)
-        public char Symbol { get; set; }
-        public string FontFamily { get; set; }
-        public int FontSize { get; set; }
-        public string Color { get; set; }
-        public bool IsBold { get; set; }
-        public bool IsItalic { get; set; }
-        public bool IsUnderline { get; set; }
-        
-        // Estado extrínseco (único para cada posição)
-        public int Row { get; set; }
-        public int Column { get; set; }
+        public char Symbol { get; }
+        public string FontFamily { get; }
+        public int FontSize { get; }
+        public string Color { get; }
+        public bool IsBold { get; }
+        public bool IsItalic { get; }
+        public bool IsUnderline { get; }
 
-        public Character(char symbol, string fontFamily, int fontSize, string color, 
-                        bool isBold, bool isItalic, bool isUnderline, int row, int column)
+        public CharacterStyle(
+            char symbol,
+            string fontFamily,
+            int fontSize,
+            string color,
+            bool isBold,
+            bool isItalic,
+            bool isUnderline)
         {
             Symbol = symbol;
             FontFamily = fontFamily;
@@ -37,97 +32,162 @@ namespace DesignPatternChallenge
             IsBold = isBold;
             IsItalic = isItalic;
             IsUnderline = isUnderline;
-            Row = row;
-            Column = column;
         }
 
-        public void Render()
+        // Recebe estado extrínseco por parâmetro
+        public void Render(int row, int column)
         {
             var style = "";
             if (IsBold) style += "B";
             if (IsItalic) style += "I";
             if (IsUnderline) style += "U";
-            
-            Console.WriteLine($"[{Row},{Column}] '{Symbol}' {FontFamily} {FontSize}pt {Color} {style}");
+
+            Console.WriteLine($"[{row},{column}] '{Symbol}' {FontFamily} {FontSize}pt {Color} {style}");
         }
 
-        // Cada instância ocupa aproximadamente 80-100 bytes na memória
-        public int GetMemorySize()
+        // Aproximação de memória do flyweight (um por estilo)
+        public int GetMemorySizeEstimate()
         {
-            return sizeof(char) +         // Symbol: 2 bytes
-                   32 +                   // FontFamily: ~32 bytes (string)
-                   sizeof(int) +          // FontSize: 4 bytes
-                   32 +                   // Color: ~32 bytes (string)
-                   3 * sizeof(bool) +     // Booleans: 3 bytes
-                   2 * sizeof(int);       // Row, Column: 8 bytes
+            // Aqui é só demonstrativo — strings dominam o custo
+            return sizeof(char) +
+                   32 +                 // FontFamily aprox
+                   sizeof(int) +
+                   32 +                 // Color aprox
+                   3 * sizeof(bool);
         }
     }
 
+    // ============================
+    // 2) FLYWEIGHT FACTORY
+    // ============================
+    public class CharacterStyleFactory
+    {
+        private readonly Dictionary<string, CharacterStyle> _cache = new();
+
+        public CharacterStyle GetStyle(
+            char symbol,
+            string fontFamily,
+            int fontSize,
+            string color,
+            bool isBold,
+            bool isItalic,
+            bool isUnderline)
+        {
+            var key = BuildKey(symbol, fontFamily, fontSize, color, isBold, isItalic, isUnderline);
+
+            if (_cache.TryGetValue(key, out var existing))
+                return existing;
+
+            var created = new CharacterStyle(symbol, fontFamily, fontSize, color, isBold, isItalic, isUnderline);
+            _cache[key] = created;
+            return created;
+        }
+
+        public int CachedStylesCount => _cache.Count;
+
+        private static string BuildKey(char symbol, string font, int size, string color, bool b, bool i, bool u)
+            => $"{symbol}|{font}|{size}|{color}|{b}|{i}|{u}";
+    }
+
+    // ============================
+    // 3) CONTEXT (estado extrínseco)
+    // ============================
+    public class DocumentCharacter
+    {
+        public int Row { get; }
+        public int Column { get; }
+        public CharacterStyle Style { get; } // Flyweight compartilhado
+
+        public DocumentCharacter(int row, int column, CharacterStyle style)
+        {
+            Row = row;
+            Column = column;
+            Style = style;
+        }
+
+        public void Render() => Style.Render(Row, Column);
+
+        // Agora cada caractere armazena só extrínseco + referência
+        public int GetMemorySizeEstimate()
+        {
+            // 2 ints (8 bytes) + referência (depende do runtime; aqui só ilustrativo)
+            return 2 * sizeof(int) + IntPtr.Size;
+        }
+    }
+
+    // ============================
+    // 4) DOCUMENTO usando Flyweight
+    // ============================
     public class Document
     {
-        private List<Character> _characters;
+        private readonly List<DocumentCharacter> _characters = new();
+        private readonly CharacterStyleFactory _factory = new();
 
-        public Document()
+        public void AddCharacter(
+            char symbol,
+            string fontFamily,
+            int fontSize,
+            string color,
+            bool isBold,
+            bool isItalic,
+            bool isUnderline,
+            int row,
+            int column)
         {
-            _characters = new List<Character>();
+            var style = _factory.GetStyle(symbol, fontFamily, fontSize, color, isBold, isItalic, isUnderline);
+            _characters.Add(new DocumentCharacter(row, column, style));
         }
 
-        public void AddCharacter(char symbol, string fontFamily, int fontSize, string color,
-                                bool isBold, bool isItalic, bool isUnderline, int row, int column)
+        public void RenderFirst(int n)
         {
-            var character = new Character(symbol, fontFamily, fontSize, color, 
-                                        isBold, isItalic, isUnderline, row, column);
-            _characters.Add(character);
+            Console.WriteLine($"Renderizando primeiros {n} caracteres:\n");
+            for (int i = 0; i < Math.Min(n, _characters.Count); i++)
+                _characters[i].Render();
         }
 
-        public void Render()
+        public void PrintMemoryUsageEstimate()
         {
-            foreach (var character in _characters)
-            {
-                character.Render();
-            }
-        }
+            long extrinsicMemory = 0;
+            foreach (var c in _characters)
+                extrinsicMemory += c.GetMemorySizeEstimate();
 
-        public void PrintMemoryUsage()
-        {
-            long totalMemory = 0;
-            foreach (var character in _characters)
-            {
-                totalMemory += character.GetMemorySize();
-            }
-
-            Console.WriteLine($"\n=== Uso de Memória ===");
+            // Memória dos estilos cacheados
+            long intrinsicMemory = 0;
+            // Não temos acesso direto aos valores do cache aqui sem expor, então vamos mostrar o número de estilos.
+            Console.WriteLine($"\n=== Uso de Memória (Estimativa) ===");
             Console.WriteLine($"Total de caracteres: {_characters.Count}");
-            Console.WriteLine($"Memória aproximada: {totalMemory:N0} bytes ({totalMemory / 1024.0:N2} KB)");
-            Console.WriteLine($"Memória por caractere: ~{totalMemory / _characters.Count} bytes");
+            Console.WriteLine($"Estilos (flyweights) criados: {_factory.CachedStylesCount}");
+            Console.WriteLine($"Memória (extrínseco por caractere): ~{extrinsicMemory:N0} bytes (~{extrinsicMemory / 1024.0:N2} KB)");
+            Console.WriteLine("Obs: o ganho real vem de NÃO repetir strings (fonte/cor) em cada caractere.");
         }
+
+        public int TotalCharacters => _characters.Count;
+        public int TotalStyles => _factory.CachedStylesCount;
     }
 
+    // ============================
+    // 5) DEMO
+    // ============================
     class Program
     {
         static void Main(string[] args)
         {
-            Console.WriteLine("=== Editor de Texto - Problema de Memória ===\n");
+            Console.WriteLine("=== Editor de Texto (Flyweight) ===\n");
 
             var document = new Document();
 
-            // Simulando documento com texto formatado
-            // Problema: Repetição massiva de dados compartilháveis
-            
             // Linha 1: "Hello World" em Arial 12pt preto
             string text1 = "Hello World";
             for (int i = 0; i < text1.Length; i++)
             {
-                // Cada caractere 'l' cria um novo objeto completo
-                // mesmo tendo a mesma formatação!
                 document.AddCharacter(
                     text1[i],
-                    "Arial",      // Repetido em cada caractere
-                    12,           // Repetido em cada caractere
-                    "Black",      // Repetido em cada caractere
-                    false,        // Repetido em cada caractere
-                    false,        // Repetido em cada caractere
-                    false,        // Repetido em cada caractere
+                    "Arial",
+                    12,
+                    "Black",
+                    false,
+                    false,
+                    false,
                     1,
                     i + 1
                 );
@@ -139,7 +199,7 @@ namespace DesignPatternChallenge
             {
                 document.AddCharacter(
                     text2[i],
-                    "Arial",      // Repetido novamente!
+                    "Arial",
                     12,
                     "Red",
                     true,
@@ -150,7 +210,7 @@ namespace DesignPatternChallenge
                 );
             }
 
-            // Linha 3: Mais texto normal
+            // Linha 3: "This is a sample text" em Arial 12pt preto
             string text3 = "This is a sample text";
             for (int i = 0; i < text3.Length; i++)
             {
@@ -167,39 +227,15 @@ namespace DesignPatternChallenge
                 );
             }
 
-            Console.WriteLine("Renderizando primeiros 5 caracteres:\n");
-            int count = 0;
-            foreach (var ch in "Hello")
-            {
-                var character = new Character(ch, "Arial", 12, "Black", false, false, false, 1, ++count);
-                character.Render();
-            }
+            document.RenderFirst(8);
 
-            document.PrintMemoryUsage();
+            document.PrintMemoryUsageEstimate();
 
-            Console.WriteLine("\n=== PROBLEMAS ===");
-            Console.WriteLine("✗ Duplicação massiva: 'Arial', '12', 'Black' repetidos em cada caractere");
-            Console.WriteLine("✗ Caractere 'l' aparece 3x mas cria 3 objetos completos idênticos");
-            Console.WriteLine("✗ Em documento de 1 milhão de caracteres:");
-            Console.WriteLine("  → ~80-100 MB só para armazenar strings repetidas!");
-            Console.WriteLine("✗ Criação e garbage collection de milhões de objetos similares");
-            Console.WriteLine("✗ Cache miss: objetos espalhados na memória");
-
-            Console.WriteLine("\n=== IMPACTO EM ESCALA ===");
-            long charactersIn1MbDoc = 1_000_000;
-            long memoryNeeded = charactersIn1MbDoc * 80;
-            Console.WriteLine($"Documento com 1 milhão de caracteres:");
-            Console.WriteLine($"  → Memória necessária: ~{memoryNeeded / (1024 * 1024):N0} MB");
-            Console.WriteLine($"  → Mesmo com 90% de caracteres compartilháveis!");
-            Console.WriteLine($"\nPara comparação:");
-            Console.WriteLine($"  → Notepad abre arquivos de 1MB usando ~2-3 MB de RAM");
-            Console.WriteLine($"  → Nossa implementação usaria ~80 MB!");
-
-            // Perguntas para reflexão:
-            // - Como compartilhar estado intrínseco entre múltiplos objetos?
-            // - Como separar estado compartilhável (intrínseco) do não-compartilhável (extrínseco)?
-            // - Como gerenciar pool de objetos compartilhados?
-            // - Como reduzir uso de memória mantendo funcionalidade?
+            Console.WriteLine("\n=== RESULTADO ===");
+            Console.WriteLine("✅ Estado intrínseco (fonte/tamanho/cor/estilo/símbolo) é compartilhado");
+            Console.WriteLine("✅ Cada caractere guarda só posição + referência para o flyweight");
+            Console.WriteLine("✅ Redução drástica de strings e objetos repetidos");
+            Console.WriteLine($"📌 Estilos criados: {document.TotalStyles} para {document.TotalCharacters} caracteres");
         }
     }
 }
